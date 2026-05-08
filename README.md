@@ -6,7 +6,7 @@ One-command WireGuard VPN setup script for an Ubuntu server. The script installs
 
 - Ubuntu server with `sudo` access
 - Internet access from the server
-- UDP port `51820` open in your cloud firewall/security group
+- UDP port `443` open in your cloud firewall/security group
 - WireGuard app installed on your phone or client device
 
 ## Quick Install
@@ -38,7 +38,7 @@ sudo bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/vpn-setup
 
 ## After Running
 
-1. Make sure UDP port `51820` is open in your server firewall and cloud security group.
+1. Make sure UDP port `443` is open in your server firewall and cloud security group.
 2. Open the WireGuard app on your phone.
 3. Tap `+`, choose `Create from QR code`, and scan the QR code printed by the script.
 4. Connect to the VPN and visit `https://whatismyip.com` to verify that your traffic is using the server IP.

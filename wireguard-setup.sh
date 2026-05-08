@@ -70,7 +70,7 @@ mkdir -p /etc/wireguard
 cat > /etc/wireguard/wg0.conf << EOF
 [Interface]
 Address = 10.0.0.1/24
-ListenPort = 51820
+ListenPort = 443
 PrivateKey = ${SERVER_PRIVATE}
 
 PostUp = iptables -A FORWARD -i wg0 -j ACCEPT
@@ -97,7 +97,7 @@ DNS = 1.1.1.1
 
 [Peer]
 PublicKey = ${SERVER_PUBLIC}
-Endpoint = ${PUBLIC_IP}:51820
+Endpoint = ${PUBLIC_IP}:443
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 EOF
@@ -119,8 +119,8 @@ log "Firewall rules saved"
 info "Verifying setup..."
 sleep 1
 WG_STATUS=$(wg show wg0 2>&1)
-if echo "$WG_STATUS" | grep -q "listening port: 51820"; then
-  log "WireGuard is running on port 51820"
+if echo "$WG_STATUS" | grep -q "listening port: 443"; then
+  log "WireGuard is running on port 443"
 else
   error "WireGuard failed to start. Run: sudo wg show"
 fi
@@ -138,12 +138,12 @@ echo -e "${GREEN}${BOLD} VPN Setup Complete!${NC}"
 echo -e "${BOLD}================================================${NC}"
 echo ""
 echo -e "  ${CYAN}Server IP   :${NC} $PUBLIC_IP"
-echo -e "  ${CYAN}VPN Port    :${NC} 51820 (UDP)"
+echo -e "  ${CYAN}VPN Port    :${NC} 443 (UDP)"
 echo -e "  ${CYAN}Client IP   :${NC} 10.0.0.2"
 echo -e "  ${CYAN}Client conf :${NC} /root/client.conf"
 echo ""
 echo -e "  ${YELLOW}Next steps:${NC}"
-echo -e "  1. Make sure UDP port 51820 is open in AWS Security Group"
+echo -e "  1. Make sure UDP port 443 is open in your cloud firewall/security group"
 echo -e "  2. Open WireGuard app on iPhone"
 echo -e "  3. Tap + → Create from QR code → Scan above"
 echo -e "  4. Connect and visit whatismyip.com to verify"
