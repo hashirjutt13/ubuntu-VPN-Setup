@@ -1,13 +1,15 @@
-# Ubuntu WireGuard VPN Setup
+# Ubuntu WireGuard + wstunnel VPN Setup
 
-One-command WireGuard VPN setup script for an Ubuntu server. The script installs WireGuard, enables IP forwarding, creates server and client keys, starts the VPN service, saves firewall rules, and prints a QR code for importing the client config into the WireGuard mobile app.
+One-command WireGuard VPN setup script for an Ubuntu server. The script installs WireGuard, enables IP forwarding, creates server and client keys, starts WireGuard on UDP `51820`, and starts `wstunnel` on TCP `443` so WireGuard traffic can be wrapped inside a WebSocket/TLS-looking connection when the client side also runs `wstunnel`.
 
 ## Requirements
 
 - Ubuntu server with `sudo` access
 - Internet access from the server
-- UDP port `8443` open in your cloud firewall/security group
+- TCP port `443` open in your cloud firewall/security group
+- Optional direct fallback: UDP port `51820` open in your cloud firewall/security group
 - WireGuard app installed on your phone or client device
+- A client-side way to run `wstunnel` if you want TCP `443` tunneling
 
 ## Quick Install
 
@@ -38,19 +40,41 @@ sudo bash <(curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/vpn-setup
 
 ## After Running
 
-1. Make sure UDP port `8443` is open in your server firewall and cloud security group.
-2. Open the WireGuard app on your phone.
-3. Tap `+`, choose `Create from QR code`, and scan the QR code printed by the script.
+1. Make sure TCP port `443` is open in your server firewall and cloud security group.
+2. Run the generated wstunnel client command on the client side.
+3. Import the generated WireGuard config into your WireGuard client.
 4. Connect to the VPN and visit `https://whatismyip.com` to verify that your traffic is using the server IP.
 
-The generated client config is saved on the server at:
+The generated configs are saved on the server at:
 
 ```text
 /root/client.conf
+/root/client-wstunnel.conf
+/root/client-direct.conf
+/root/wstunnel-client-command.txt
 ```
+
+## Important iPhone Note
+
+The official iPhone WireGuard app cannot run `wstunnel` by itself. For the TCP `443` tunnel mode to work, something on the client side must run the `wstunnel client` command and listen locally on UDP `51820`.
+
+That means one of these must be true:
+
+- You use a compatible iOS tunneling app that can run `wstunnel` or an equivalent WebSocket UDP tunnel.
+- You run `wstunnel client` on a travel router, laptop, or another device, and route the iPhone through that device.
+- You use the direct fallback config, which uses normal WireGuard UDP `51820` and may still be blocked on some mobile networks.
+
+For wstunnel mode, the WireGuard endpoint is:
+
+```text
+127.0.0.1:51820
+```
+
+That is intentional. WireGuard sends traffic to the local wstunnel client, and wstunnel carries it to the server over TCP `443`.
 
 ## Notes
 
 - The script is intended for a fresh Ubuntu server.
 - Re-running it will regenerate WireGuard keys and overwrite `/etc/wireguard/wg0.conf` and `/root/client.conf`.
 - Keep `/root/client.conf` private because it contains the client private key.
+- wstunnel uses its embedded self-signed TLS certificate by default. For a cleaner production setup, use a domain and a valid TLS certificate.
