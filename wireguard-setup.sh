@@ -24,6 +24,51 @@ info()   { echo -e "${CYAN}[→]${NC} $1"; }
 warn()   { echo -e "${YELLOW}[!]${NC} $1"; }
 error()  { echo -e "${RED}[✘]${NC} $1"; exit 1; }
 
+cleanup_previous_setup() {
+  info "Cleaning previous WireGuard/wstunnel setup..."
+  systemctl disable --now wstunnel-wireguard > /dev/null 2>&1 || true
+  systemctl stop wg-quick@wg0 > /dev/null 2>&1 || true
+  rm -f /etc/systemd/system/wstunnel-wireguard.service
+  rm -f /etc/wireguard/wg0.conf
+  rm -f /root/client.conf /root/client-wstunnel.conf /root/client-direct.conf
+  rm -f /root/wstunnel-client-command.txt /root/xlarva-values.txt
+  systemctl daemon-reload > /dev/null 2>&1 || true
+  log "Previous setup cleaned"
+}
+
+free_tcp_port() {
+  local port="$1"
+  local listeners
+  local service
+
+  info "Checking TCP port ${port}..."
+
+  for service in nginx apache2 caddy haproxy traefik; do
+    if ss -H -ltnp "sport = :${port}" 2>/dev/null | grep -q "\"${service}\""; then
+      warn "Stopping ${service} because it is using TCP ${port}"
+      systemctl disable --now "$service" > /dev/null 2>&1 || true
+    fi
+  done
+
+  if ss -H -ltnp "sport = :${port}" 2>/dev/null | grep -q '"wstunnel"'; then
+    warn "Stopping orphaned wstunnel process on TCP ${port}"
+    pkill -x wstunnel > /dev/null 2>&1 || true
+    sleep 1
+  fi
+
+  listeners=$(ss -H -ltnp "sport = :${port}" 2>/dev/null || true)
+  if [ -n "$listeners" ]; then
+    echo "$listeners"
+    error "TCP ${port} is still in use. Stop the process above and rerun this script."
+  fi
+
+  log "TCP port ${port} is free"
+}
+
+remove_iptables_rule() {
+  while iptables "$@" > /dev/null 2>&1; do :; done
+}
+
 echo ""
 echo -e "${BOLD}================================================${NC}"
 echo -e "${BOLD}       WireGuard VPN - Auto Setup Script        ${NC}"
@@ -32,6 +77,12 @@ echo ""
 
 # ---- Must run as root ----
 [ "$EUID" -ne 0 ] && error "Please run as root: sudo bash wireguard-setup.sh"
+
+# ---- Install dependencies ----
+info "Installing WireGuard and dependencies..."
+apt-get update -qq
+DEBIAN_FRONTEND=noninteractive apt-get install -y wireguard wireguard-tools qrencode iptables-persistent curl ca-certificates tar openssl iproute2 > /dev/null 2>&1
+log "Dependencies installed"
 
 # ---- Detect public IP ----
 info "Detecting server public IP..."
@@ -44,11 +95,12 @@ INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
 [ -z "$INTERFACE" ] && error "Could not detect network interface."
 log "Network interface: $INTERFACE"
 
-# ---- Install dependencies ----
-info "Installing WireGuard and dependencies..."
-apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y wireguard wireguard-tools qrencode iptables-persistent curl ca-certificates tar openssl > /dev/null 2>&1
-log "Dependencies installed"
+# ---- Cleanup previous setup and free ports ----
+cleanup_previous_setup
+free_tcp_port "$WSTUNNEL_PORT"
+remove_iptables_rule -D FORWARD -i wg0 -j ACCEPT
+remove_iptables_rule -D FORWARD -o wg0 -j ACCEPT
+remove_iptables_rule -t nat -D POSTROUTING -o "$INTERFACE" -j MASQUERADE
 
 [ -z "$WSTUNNEL_PATH" ] && WSTUNNEL_PATH=$(openssl rand -hex 24)
 
@@ -156,6 +208,48 @@ EOF
 chmod 600 /root/wstunnel-client-command.txt
 log "wstunnel client command written"
 
+# ---- Write Xlarva helper values ----
+info "Writing Xlarva helper values..."
+cat > /root/xlarva-values.txt << EOF
+Xlarva / WireGuard over WebSocket values
+=======================================
+
+Transport / WebSocket
+Server URL: wss://${PUBLIC_IP}:${WSTUNNEL_PORT}
+Server Host/IP: ${PUBLIC_IP}
+Server Port: ${WSTUNNEL_PORT}
+HTTP Upgrade Path Prefix: ${WSTUNNEL_PATH}
+TLS/SNI: ${PUBLIC_IP}
+TLS Certificate Verification: off / allow self-signed
+
+Local WireGuard UDP listener
+Local Host: 127.0.0.1
+Local Port: ${WG_PORT}
+
+WireGuard interface
+Private Key: ${CLIENT_PRIVATE}
+Address: 10.0.0.2/24
+DNS: 1.1.1.1
+MTU: 1300
+
+WireGuard peer
+Public Key: ${SERVER_PUBLIC}
+Endpoint: 127.0.0.1:${WG_PORT}
+Allowed IPs: 0.0.0.0/0
+Persistent Keepalive: 25
+
+Direct WireGuard fallback
+Endpoint: ${PUBLIC_IP}:${WG_PORT}
+
+Generated files
+/root/client-wstunnel.conf
+/root/client-direct.conf
+/root/wstunnel-client-command.txt
+/root/xlarva-values.txt
+EOF
+chmod 600 /root/xlarva-values.txt
+log "Xlarva helper values written"
+
 # ---- Start WireGuard ----
 info "Starting WireGuard..."
 systemctl enable wg-quick@wg0 > /dev/null 2>&1
@@ -227,6 +321,14 @@ echo -e "  ${CYAN}Client IP   :${NC} 10.0.0.2"
 echo -e "  ${CYAN}WG tunnel   :${NC} /root/client-wstunnel.conf"
 echo -e "  ${CYAN}WG direct   :${NC} /root/client-direct.conf"
 echo -e "  ${CYAN}wstunnel cmd:${NC} /root/wstunnel-client-command.txt"
+echo -e "  ${CYAN}Xlarva vals :${NC} /root/xlarva-values.txt"
+echo ""
+echo -e "${BOLD}Xlarva values:${NC}"
+echo -e "  ${CYAN}Server URL  :${NC} wss://${PUBLIC_IP}:${WSTUNNEL_PORT}"
+echo -e "  ${CYAN}Path prefix :${NC} ${WSTUNNEL_PATH}"
+echo -e "  ${CYAN}Local UDP   :${NC} 127.0.0.1:${WG_PORT}"
+echo -e "  ${CYAN}WG endpoint :${NC} 127.0.0.1:${WG_PORT}"
+echo -e "  ${CYAN}TLS verify  :${NC} off / allow self-signed"
 echo ""
 echo -e "  ${YELLOW}Next steps:${NC}"
 echo -e "  1. Open TCP port ${WSTUNNEL_PORT} in your cloud firewall/security group"
