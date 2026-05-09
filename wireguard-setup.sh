@@ -173,14 +173,14 @@ Requires=wg-quick@wg0.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/wstunnel server --restrict-to 127.0.0.1:${WG_PORT} --restrict-http-upgrade-path-prefix ${WSTUNNEL_PATH} wss://[::]:${WSTUNNEL_PORT}
+ExecStart=/usr/local/bin/wstunnel server --restrict-to 127.0.0.1:${WG_PORT} --restrict-http-upgrade-path-prefix ${WSTUNNEL_PATH} wss://0.0.0.0:${WSTUNNEL_PORT}
 Restart=always
 RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOF
-chmod 600 /etc/systemd/system/wstunnel-wireguard.service
+chmod 644 /etc/systemd/system/wstunnel-wireguard.service
 systemctl daemon-reload
 systemctl enable wstunnel-wireguard > /dev/null 2>&1
 systemctl restart wstunnel-wireguard
@@ -204,6 +204,7 @@ fi
 if systemctl is-active --quiet wstunnel-wireguard; then
   log "wstunnel is running on TCP ${WSTUNNEL_PORT}"
 else
+  systemctl status --no-pager -l wstunnel-wireguard || true
   error "wstunnel failed to start. Run: sudo journalctl -u wstunnel-wireguard"
 fi
 
